@@ -69,8 +69,7 @@
         "https://*.bunny.net/*"
       ],
       "webOrigins": [
-        "http://localhost:8000",
-        "+"
+        "*"
       ],
       "defaultClientScopes": [
         "openid",

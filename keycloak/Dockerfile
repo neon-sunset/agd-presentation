@@ -4,10 +4,8 @@ COPY realm-export.json /opt/keycloak/data/import/realm-export.json
 
 ENV KC_HEALTH_ENABLED=true \
     KC_METRICS_ENABLED=false \
-    KC_HTTP_ENABLED=true \
     KC_HOSTNAME_STRICT=false \
-    KC_PROXY_HEADERS=xforwarded \
-    KC_DB=dev-mem
+    KC_PROXY_HEADERS=xforwarded
 
 # Bootstrap admin credentials MUST be supplied at runtime via:
 #   KC_BOOTSTRAP_ADMIN_USERNAME
@@ -16,4 +14,9 @@ ENV KC_HEALTH_ENABLED=true \
 
 EXPOSE 8080
 
-ENTRYPOINT ["/opt/keycloak/bin/kc.sh", "start", "--import-realm", "--optimized=false", "--cache=local"]
+# start-dev is correct for this throwaway demo IdP:
+#   - in-memory H2 DB (resets between deploys, ideal for live re-runs of the demo)
+#   - HTTP enabled by default (TLS is terminated upstream by MC + the PZ)
+#   - relaxed hostname rules (accepts whatever PZ/MC URL fronts it)
+#   - no JGroups clustering (local-cache only)
+ENTRYPOINT ["/opt/keycloak/bin/kc.sh", "start-dev", "--import-realm"]
