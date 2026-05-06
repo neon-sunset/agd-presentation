@@ -301,6 +301,32 @@ def _public_base_url(request: Request) -> str:
     return f"{proto}://{host}"
 
 
+def _downconvert_to_oas_30(node: Any) -> Any:
+    """
+    Walk the schema tree and rewrite OAS 3.1-isms that FastAPI emits into
+    OAS 3.0-compatible equivalents. API Guardian matches Cloudflare's API
+    Gateway and validates against 3.0.x — 3.1-only constructs are rejected.
+
+    Currently rewrites the most common one Pydantic v2 produces:
+      `anyOf: [<schema>, {"type": "null"}]`  →  `<schema>` + `nullable: true`
+    """
+    if isinstance(node, dict):
+        any_of = node.get("anyOf")
+        if isinstance(any_of, list):
+            non_null = [s for s in any_of if not (isinstance(s, dict) and s.get("type") == "null")]
+            had_null = len(non_null) != len(any_of)
+            if had_null and len(non_null) == 1 and isinstance(non_null[0], dict):
+                merged = {**non_null[0], **{k: v for k, v in node.items() if k != "anyOf"}}
+                merged["nullable"] = True
+                return _downconvert_to_oas_30(merged)
+            if had_null:
+                node = {**node, "anyOf": non_null, "nullable": True}
+        return {k: _downconvert_to_oas_30(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_downconvert_to_oas_30(v) for v in node]
+    return node
+
+
 @app.get("/openapi.json", include_in_schema=False)
 def openapi_spec(request: Request) -> JSONResponse:
     from fastapi.openapi.utils import get_openapi
@@ -310,6 +336,7 @@ def openapi_spec(request: Request) -> JSONResponse:
         version=app.version,
         description=app.description,
         routes=app.routes,
+        openapi_version="3.0.3",
     )
     schema["servers"] = [{"url": _public_base_url(request)}]
     schema.setdefault("components", {}).setdefault("securitySchemes", {})["oidc"] = {
@@ -317,4 +344,5 @@ def openapi_spec(request: Request) -> JSONResponse:
         "openIdConnectUrl": OIDC_DISCOVERY_URL,
     }
     _apply_shield_hints(schema)
+    schema = _downconvert_to_oas_30(schema)
     return JSONResponse(content=schema)
