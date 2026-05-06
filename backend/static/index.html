@@ -232,7 +232,10 @@
       const authServerUrl = `${url.origin}`;
       kc = new Keycloak({ url: authServerUrl, realm, clientId: cfg.oidcClientId });
       try {
-        await kc.init({ onLoad: "check-sso", checkLoginIframe: false, pkceMethod: "S256" });
+        // No onLoad: don't probe SSO on landing — user signs in by clicking the button.
+        // checkLoginIframe is disabled so we don't poll Keycloak for session changes
+        // (would require an extra static page on our origin to host the iframe).
+        await kc.init({ checkLoginIframe: false, pkceMethod: "S256" });
       } catch (e) {
         console.warn("Keycloak init failed", e);
       }
