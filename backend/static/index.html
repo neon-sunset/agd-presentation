@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>API Guardian Demo</title>
-  <script src="/config.js"></script>
   <style>
     :root {
       --bg: #0e1117;
@@ -107,6 +106,10 @@
     <h1>API Guardian Demo · <span style="color: var(--muted); font-weight: 400;">Bunny Shield</span></h1>
     <div class="auth">
       <span id="user-state">not signed in</span>
+      <input id="login-username" placeholder="username" value="demo" autocomplete="off"
+             style="margin-left:10px; padding:5px 8px; background:var(--panel-2); border:1px solid var(--border); color:var(--text); border-radius:4px; width:90px; font-size:12px;" />
+      <input id="login-password" type="password" placeholder="password" value="demo" autocomplete="off"
+             style="margin-left:6px; padding:5px 8px; background:var(--panel-2); border:1px solid var(--border); color:var(--text); border-radius:4px; width:90px; font-size:12px;" />
       <button id="login-btn">Sign in</button>
       <button id="logout-btn" style="display:none;">Sign out</button>
     </div>
@@ -220,43 +223,58 @@
     </div>
   </div>
 
-  <script type="module">
-    import Keycloak from "https://cdn.jsdelivr.net/npm/keycloak-js@26.0.7/+esm";
-    const cfg = window.DEMO_CONFIG;
-    const apiBase = cfg.apiBase || "";
-    let kc = null;
-
-    async function initKeycloak() {
-      const url = new URL(cfg.oidcIssuer);
-      const realm = url.pathname.split("/").pop();
-      const authServerUrl = `${url.origin}`;
-      kc = new Keycloak({ url: authServerUrl, realm, clientId: cfg.oidcClientId });
-      try {
-        // No onLoad: don't probe SSO on landing — user signs in by clicking the button.
-        // checkLoginIframe is disabled so we don't poll Keycloak for session changes
-        // (would require an extra static page on our origin to host the iframe).
-        await kc.init({ checkLoginIframe: false, pkceMethod: "S256" });
-      } catch (e) {
-        console.warn("Keycloak init failed", e);
-      }
-      renderAuth();
-    }
+  <script>
+    let token = null;
+    let username = null;
 
     function renderAuth() {
       const u = document.getElementById("user-state");
       const li = document.getElementById("login-btn");
       const lo = document.getElementById("logout-btn");
-      if (kc?.authenticated) {
-        u.textContent = `signed in as ${kc.tokenParsed?.preferred_username || kc.tokenParsed?.email || "user"}`;
+      const uin = document.getElementById("login-username");
+      const pin = document.getElementById("login-password");
+      if (token) {
+        u.textContent = `signed in as ${username}`;
         li.style.display = "none"; lo.style.display = "inline-block";
+        uin.style.display = "none"; pin.style.display = "none";
       } else {
         u.textContent = "not signed in";
         li.style.display = "inline-block"; lo.style.display = "none";
+        uin.style.display = "inline-block"; pin.style.display = "inline-block";
       }
     }
 
-    document.getElementById("login-btn").onclick = () => kc.login();
-    document.getElementById("logout-btn").onclick = () => kc.logout();
+    async function doLogin() {
+      const u = document.getElementById("login-username").value.trim();
+      const p = document.getElementById("login-password").value;
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: u, password: p }),
+      });
+      const text = await res.text();
+      let parsed; try { parsed = JSON.parse(text); } catch { parsed = {}; }
+      setOutput({
+        title: "POST /api/login",
+        status: res.status,
+        summary: `${res.status} ${res.statusText} — /api/login`,
+        body: text ? JSON.stringify(parsed, null, 2) : "(empty)",
+      });
+      if (res.ok && parsed.access_token) {
+        token = parsed.access_token;
+        username = u;
+        renderAuth();
+      }
+    }
+
+    function doLogout() {
+      token = null;
+      username = null;
+      renderAuth();
+    }
+
+    document.getElementById("login-btn").onclick = doLogin;
+    document.getElementById("logout-btn").onclick = doLogout;
 
     function setOutput({ title, status, summary, body }) {
       document.getElementById("out-title").textContent = title;
@@ -268,12 +286,10 @@
     }
 
     async function fire({ method = "GET", path, headers = {}, body = null, requireAuth = false, raw = false }) {
-      const url = `${apiBase}${path}`;
       const reqLine = `${method} ${path}`;
       const reqHeaders = { ...headers };
-      if (requireAuth && kc?.authenticated) {
-        try { await kc.updateToken(30); } catch {}
-        reqHeaders["Authorization"] = `Bearer ${kc.token}`;
+      if (requireAuth && token) {
+        reqHeaders["Authorization"] = `Bearer ${token}`;
       }
       let opts = { method, headers: reqHeaders };
       if (body !== null) {
@@ -281,21 +297,21 @@
         opts.body = raw ? body : JSON.stringify(body);
       }
       try {
-        const res = await fetch(url, opts);
+        const res = await fetch(path, opts);
         const text = await res.text();
         let parsed;
         try { parsed = JSON.stringify(JSON.parse(text), null, 2); } catch { parsed = text; }
         setOutput({
           title: reqLine,
           status: res.status,
-          summary: `${res.status} ${res.statusText} — ${url}`,
+          summary: `${res.status} ${res.statusText} — ${path}`,
           body: parsed || "(empty)",
         });
       } catch (err) {
         setOutput({
           title: reqLine,
           status: 0,
-          summary: `network error — ${url}`,
+          summary: `network error — ${path}`,
           body: String(err),
         });
       }
@@ -344,7 +360,7 @@
       });
     });
 
-    initKeycloak();
+    renderAuth();
   </script>
 </body>
 </html>

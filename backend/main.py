@@ -4,27 +4,35 @@ API Guardian demo backend.
 A small SaaS-like API designed to showcase:
   - Schema validation (path/query/body/headers/response) via API Guardian
   - False positives that CRS/managed rules would produce on legitimate API traffic
-  - Unattended OIDC discovery & enforcement (via Keycloak)
+  - Bearer JWT auth — AGD does structural validation at the edge
 
 The OAS spec is augmented with `x-bunny-shield` extensions on selected
-parameters and an `openIdConnect` securityScheme so Shield can fetch the
-discovery document automatically.
+parameters and a `bearerAuth` (HTTP bearer / JWT) security scheme on the
+protected endpoints.
 """
 
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from typing import Annotated, Any
 
+import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from enum import Enum
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-OIDC_ISSUER = os.environ.get("OIDC_ISSUER", "http://localhost:8080/realms/demo")
-OIDC_DISCOVERY_URL = f"{OIDC_ISSUER}/.well-known/openid-configuration"
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-only-demo-secret-change-me-in-prod")
+JWT_ALG = "HS256"
+JWT_TTL_SECONDS = 3600
+
+DEMO_USERS: dict[str, dict[str, Any]] = {
+    "demo": {"password": "demo", "email": "demo@example.com", "roles": ["user"]},
+    "alice": {"password": "alice", "email": "alice@example.com", "roles": ["user", "admin"]},
+}
 
 app = FastAPI(
     title="API Guardian Demo",
@@ -112,19 +120,44 @@ PRODUCTS: list[Product] = [
 
 
 # ---------------------------------------------------------------------------
-# Auth dependency (real verification happens at the edge via Shield)
+# Auth: tiny in-process JWT (HS256). Shield does structural validation at the
+# edge; the backend additionally verifies the signature so local runs without
+# Shield still behave like prod.
 # ---------------------------------------------------------------------------
 
 
-def require_bearer(authorization: Annotated[str | None, Header()] = None) -> str:
-    """
-    Backend trusts that Shield has already verified the JWT against the OIDC
-    provider's JWKS. We just sanity-check that *some* bearer token is present
-    so local dev still behaves predictably.
-    """
+class LoginIn(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"additionalProperties": False})
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class LoginOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
+def mint_jwt(username: str, roles: list[str]) -> str:
+    now = int(time.time())
+    payload = {
+        "sub": username,
+        "roles": roles,
+        "iat": now,
+        "exp": now + JWT_TTL_SECONDS,
+        "iss": "agd-demo",
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def require_bearer(authorization: Annotated[str | None, Header()] = None) -> dict[str, Any]:
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
-    return authorization.split(" ", 1)[1]
+    token = authorization.split(" ", 1)[1]
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except jwt.PyJWTError as e:
+        raise HTTPException(status_code=401, detail=f"invalid token: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -195,8 +228,22 @@ def create_review(review: ReviewIn) -> ReviewOut:
 
 
 # ---------------------------------------------------------------------------
-# OIDC-protected endpoints
+# Login + JWT-protected endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/api/login",
+    response_model=LoginOut,
+    tags=["auth"],
+    summary="Issue a Bearer JWT for the demo users (demo/demo, alice/alice)",
+)
+def login(creds: LoginIn) -> LoginOut:
+    user = DEMO_USERS.get(creds.username)
+    if not user or user["password"] != creds.password:
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    token = mint_jwt(creds.username, user["roles"])
+    return LoginOut(access_token=token, expires_in=JWT_TTL_SECONDS)
 
 
 @app.get(
@@ -204,14 +251,15 @@ def create_review(review: ReviewIn) -> ReviewOut:
     response_model=Account,
     tags=["account"],
     summary="Get the current user account",
-    openapi_extra={"security": [{"oidc": ["openid", "profile", "email"]}]},
+    openapi_extra={"security": [{"bearerAuth": []}]},
 )
-def get_account(_token: str = Depends(require_bearer)) -> JSONResponse:
+def get_account(claims: dict = Depends(require_bearer)) -> JSONResponse:
     # Deliberately returns an extra `internalNotes` field that is NOT in the
     # response schema. Use this to demo response-validation enforcement.
+    username = claims.get("sub", "unknown")
     leaky_payload: dict[str, Any] = {
-        "id": "user-42",
-        "email": "demo@example.com",
+        "id": f"user-{username}",
+        "email": DEMO_USERS.get(username, {}).get("email", f"{username}@example.com"),
         "plan": "pro",
         "internalNotes": "do_not_leak: customer flagged for upsell",
     }
@@ -224,9 +272,9 @@ def get_account(_token: str = Depends(require_bearer)) -> JSONResponse:
     status_code=201,
     tags=["orders"],
     summary="Place an order",
-    openapi_extra={"security": [{"oidc": ["openid", "profile", "email"]}]},
+    openapi_extra={"security": [{"bearerAuth": []}]},
 )
-def create_order(order: OrderIn, _token: str = Depends(require_bearer)) -> OrderOut:
+def create_order(order: OrderIn, _claims: dict = Depends(require_bearer)) -> OrderOut:
     return OrderOut(
         id=str(uuid.uuid4()),
         productId=order.productId,
@@ -248,22 +296,8 @@ def index() -> FileResponse:
     return FileResponse("static/index.html")
 
 
-@app.get("/config.js", include_in_schema=False)
-def config_js() -> Response:
-    """Expose a tiny runtime config so the static frontend can find Keycloak."""
-    client_id = os.environ.get("OIDC_CLIENT_ID", "demo-spa")
-    body = (
-        "window.DEMO_CONFIG = {\n"
-        f'  oidcIssuer: "{OIDC_ISSUER}",\n'
-        f'  oidcClientId: "{client_id}",\n'
-        '  apiBase: ""\n'
-        "};\n"
-    )
-    return Response(content=body, media_type="application/javascript")
-
-
 # ---------------------------------------------------------------------------
-# OpenAPI customization: inject OIDC securityScheme + servers
+# OpenAPI customization: inject bearerAuth securityScheme + servers
 # ---------------------------------------------------------------------------
 
 
@@ -339,9 +373,10 @@ def openapi_spec(request: Request) -> JSONResponse:
         openapi_version="3.0.3",
     )
     schema["servers"] = [{"url": _public_base_url(request)}]
-    schema.setdefault("components", {}).setdefault("securitySchemes", {})["oidc"] = {
-        "type": "openIdConnect",
-        "openIdConnectUrl": OIDC_DISCOVERY_URL,
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})["bearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
     }
     _apply_shield_hints(schema)
     schema = _downconvert_to_oas_30(schema)
