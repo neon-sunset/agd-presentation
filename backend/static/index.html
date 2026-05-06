@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>API Guardian Demo</title>
   <script src="/config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/keycloak-js@26.0.7/lib/keycloak.min.js"></script>
   <style>
     :root {
       --bg: #0e1117;
@@ -221,7 +220,8 @@
     </div>
   </div>
 
-  <script>
+  <script type="module">
+    import Keycloak from "https://cdn.jsdelivr.net/npm/keycloak-js@26.0.7/+esm";
     const cfg = window.DEMO_CONFIG;
     const apiBase = cfg.apiBase || "";
     let kc = null;
