@@ -18,11 +18,12 @@ A small demo app that pairs with **Bunny Shield's API Guardian** to showcase:
 ## Local run
 
 ```bash
+cp .env.example .env   # then edit values
 docker compose up --build
 ```
 
 - App: <http://localhost:8000>
-- Keycloak admin: <http://localhost:8080> (admin / admin)
+- Keycloak admin: <http://localhost:8080> (creds from your `.env`)
 - OIDC discovery: <http://localhost:8080/realms/demo/.well-known/openid-configuration>
 - OpenAPI spec: <http://localhost:8000/openapi.json>
 
@@ -43,10 +44,15 @@ on push to `main`):
 It needs to be reachable from the Bunny edge so Shield can fetch the
 discovery document. **Do not put a Pull Zone in front of Keycloak.**
 
-Required env vars:
+**Required env vars (no defaults — boot will fail without them):**
 
-- `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD`
-  (override the defaults)
+- `KC_BOOTSTRAP_ADMIN_USERNAME` — pick a non-obvious username
+- `KC_BOOTSTRAP_ADMIN_PASSWORD` — generate with e.g. `openssl rand -base64 24`
+
+These are the bootstrap admin credentials for Keycloak's master realm. Once
+the IdP is publicly reachable, anyone who finds it will try `admin/admin`,
+so do not use those values. The image deliberately ships **without** any
+default — Keycloak will refuse to start if both vars aren't set.
 
 After it boots, copy its public URL — call it `IDP_URL`. Verify:
 

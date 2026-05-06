@@ -7,9 +7,12 @@ ENV KC_HEALTH_ENABLED=true \
     KC_HTTP_ENABLED=true \
     KC_HOSTNAME_STRICT=false \
     KC_PROXY_HEADERS=xforwarded \
-    KC_DB=dev-mem \
-    KC_BOOTSTRAP_ADMIN_USERNAME=admin \
-    KC_BOOTSTRAP_ADMIN_PASSWORD=admin
+    KC_DB=dev-mem
+
+# Bootstrap admin credentials MUST be supplied at runtime via:
+#   KC_BOOTSTRAP_ADMIN_USERNAME
+#   KC_BOOTSTRAP_ADMIN_PASSWORD
+# Never bake them into the image — this image is published publicly to GHCR.
 
 EXPOSE 8080
 
