@@ -145,7 +145,7 @@
       <div class="row">
         <button class="action bad" data-demo="search-bad-category">
           <span class="label">SQLi via category param</span>
-          <span class="hint">category=' OR 1=1-- — schema enum + detectsqli</span>
+          <span class="hint">category=' UNION SELECT NULL-- — schema enum + detectsqli</span>
         </button>
         <button class="action bad" data-demo="search-bad-limit">
           <span class="label">Wrong type for limit</span>
@@ -326,7 +326,7 @@
         body: { productId: "11111111-1111-1111-1111-111111111111", rating: 5, comment: "Great router. The SELECT statement in the docs was helpful." },
       }),
 
-      "search-bad-category": () => fire({ path: "/api/products?category=" + encodeURIComponent("' OR 1=1--") }),
+      "search-bad-category": () => fire({ path: "/api/products?category=" + encodeURIComponent("' UNION SELECT NULL,NULL--") }),
       "search-bad-limit": () => fire({ path: "/api/products?limit=abc" }),
       "path-injection": () => fire({ path: "/api/products/" + encodeURIComponent("'; DROP TABLE users;--") }),
       "review-extra-field": () => fire({
