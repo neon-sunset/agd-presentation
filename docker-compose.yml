@@ -1,0 +1,27 @@
+services:
+  keycloak:
+    build: ./keycloak
+    image: ghcr.io/neon-sunset/agd-presentation-idp:local
+    ports:
+      - "8080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/demo/.well-known/openid-configuration HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q 200"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build: ./backend
+    image: ghcr.io/neon-sunset/agd-presentation-api:local
+    ports:
+      - "8000:8000"
+    environment:
+      OIDC_ISSUER: "http://localhost:8080/realms/demo"
+      OIDC_CLIENT_ID: "demo-spa"
+      PUBLIC_BASE_URL: "http://localhost:8000"
+    depends_on:
+      keycloak:
+        condition: service_healthy

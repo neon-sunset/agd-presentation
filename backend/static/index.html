@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Guardian Demo</title>
+  <script src="/config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/keycloak-js@26.0.7/lib/keycloak.min.js"></script>
+  <style>
+    :root {
+      --bg: #0e1117;
+      --panel: #161b22;
+      --panel-2: #1f2630;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #f97316;
+      --good: #3fb950;
+      --bad: #f85149;
+      --border: #30363d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      line-height: 1.45;
+    }
+    header {
+      padding: 18px 28px;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    .auth { font-size: 13px; color: var(--muted); }
+    .auth button {
+      margin-left: 10px;
+      background: var(--accent); color: #000;
+      border: 0; padding: 6px 12px; border-radius: 4px;
+      cursor: pointer; font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      padding: 24px 28px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 18px;
+    }
+    section h2 {
+      font-size: 14px; margin: 0 0 12px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--muted); font-weight: 600;
+    }
+    .row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    button.action {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px; border-radius: 4px;
+      cursor: pointer; font-size: 13px;
+      text-align: left; flex: 1; min-width: 200px;
+    }
+    button.action:hover { border-color: var(--accent); }
+    button.action .label { display: block; font-weight: 600; margin-bottom: 2px; }
+    button.action .hint { display: block; color: var(--muted); font-size: 11px; }
+    button.action.bad .label::before { content: "✗ "; color: var(--bad); }
+    button.action.good .label::before { content: "✓ "; color: var(--good); }
+    .output {
+      grid-column: 1 / -1;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0;
+      overflow: hidden;
+    }
+    .output header {
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      background: var(--panel-2);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .output header h2 { margin: 0; font-size: 14px; }
+    .status-pill {
+      padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+      background: var(--panel); color: var(--muted);
+    }
+    .status-pill.ok { background: rgba(63,185,80,.15); color: var(--good); }
+    .status-pill.err { background: rgba(248,81,73,.15); color: var(--bad); }
+    pre {
+      margin: 0; padding: 16px 18px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12.5px; white-space: pre-wrap; word-break: break-word;
+      max-height: 50vh; overflow: auto;
+    }
+    .req { color: var(--muted); }
+    .summary {
+      padding: 14px 18px; background: var(--panel-2);
+      border-bottom: 1px solid var(--border);
+      font-size: 13px; color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>API Guardian Demo · <span style="color: var(--muted); font-weight: 400;">Bunny Shield</span></h1>
+    <div class="auth">
+      <span id="user-state">not signed in</span>
+      <button id="login-btn">Sign in</button>
+      <button id="logout-btn" style="display:none;">Sign out</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <section>
+      <h2>Public catalog (legit traffic)</h2>
+      <div class="row">
+        <button class="action good" data-demo="search-normal">
+          <span class="label">Search products</span>
+          <span class="hint">GET /api/products?q=router&amp;category=networking</span>
+        </button>
+        <button class="action good" data-demo="search-tricky">
+          <span class="label">Search "1' OR rating&gt;4"</span>
+          <span class="hint">Looks like SQLi to CRS, fine to AGD (q is not scanned)</span>
+        </button>
+      </div>
+      <div class="row">
+        <button class="action good" data-demo="get-product">
+          <span class="label">Get one product</span>
+          <span class="hint">GET /api/products/&lt;valid-uuid&gt;</span>
+        </button>
+        <button class="action good" data-demo="review-normal">
+          <span class="label">Submit review</span>
+          <span class="hint">POST /api/reviews — comment includes "SELECT"</span>
+        </button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Attacks (AGD should block these)</h2>
+      <div class="row">
+        <button class="action bad" data-demo="search-bad-category">
+          <span class="label">SQLi via category param</span>
+          <span class="hint">category=' OR 1=1-- — schema enum + detectsqli</span>
+        </button>
+        <button class="action bad" data-demo="search-bad-limit">
+          <span class="label">Wrong type for limit</span>
+          <span class="hint">limit=abc — schema says integer</span>
+        </button>
+      </div>
+      <div class="row">
+        <button class="action bad" data-demo="path-injection">
+          <span class="label">SQLi in path param</span>
+          <span class="hint">/api/products/'; DROP TABLE users;--</span>
+        </button>
+        <button class="action bad" data-demo="review-extra-field">
+          <span class="label">Review with rogue field</span>
+          <span class="hint">POST /api/reviews + extra `isAdmin: true`</span>
+        </button>
+      </div>
+      <div class="row">
+        <button class="action bad" data-demo="review-bad-rating">
+          <span class="label">Review rating=99</span>
+          <span class="hint">Out of schema range (1–5)</span>
+        </button>
+        <button class="action bad" data-demo="review-missing-field">
+          <span class="label">Review missing comment</span>
+          <span class="hint">Required field omitted</span>
+        </button>
+      </div>
+    </section>
+
+    <section>
+      <h2>OIDC-protected (auto-discovered by Shield)</h2>
+      <div class="row">
+        <button class="action good" data-demo="account">
+          <span class="label">Get account (signed in)</span>
+          <span class="hint">GET /api/account — backend leaks `internalNotes`, AGD strips/blocks</span>
+        </button>
+        <button class="action good" data-demo="order">
+          <span class="label">Place an order</span>
+          <span class="hint">POST /api/orders — JWT validated at edge</span>
+        </button>
+      </div>
+      <div class="row">
+        <button class="action bad" data-demo="account-no-token">
+          <span class="label">Account without token</span>
+          <span class="hint">No Authorization header — Shield rejects</span>
+        </button>
+        <button class="action bad" data-demo="account-bad-token">
+          <span class="label">Account with junk token</span>
+          <span class="hint">Bearer abc.def.ghi — JWKS verify fails at edge</span>
+        </button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Schema</h2>
+      <div class="row">
+        <button class="action" data-demo="show-spec">
+          <span class="label">View OpenAPI spec</span>
+          <span class="hint">GET /openapi.json — what Shield ingests</span>
+        </button>
+      </div>
+      <p style="color: var(--muted); font-size: 12px; margin: 8px 0 0;">
+        The spec includes <code>x-bunny-shield</code> hints on selected
+        parameters and an <code>openIdConnect</code> security scheme pointing
+        at the Keycloak discovery URL.
+      </p>
+    </section>
+
+    <div class="output">
+      <header>
+        <h2 id="out-title">Last response</h2>
+        <span class="status-pill" id="status-pill">—</span>
+      </header>
+      <div class="summary" id="out-summary">Click a button above to fire a request.</div>
+      <pre id="out-body"></pre>
+    </div>
+  </div>
+
+  <script>
+    const cfg = window.DEMO_CONFIG;
+    const apiBase = cfg.apiBase || "";
+    let kc = null;
+
+    async function initKeycloak() {
+      const url = new URL(cfg.oidcIssuer);
+      const realm = url.pathname.split("/").pop();
+      const authServerUrl = `${url.origin}`;
+      kc = new Keycloak({ url: authServerUrl, realm, clientId: cfg.oidcClientId });
+      try {
+        await kc.init({ onLoad: "check-sso", checkLoginIframe: false, pkceMethod: "S256" });
+      } catch (e) {
+        console.warn("Keycloak init failed", e);
+      }
+      renderAuth();
+    }
+
+    function renderAuth() {
+      const u = document.getElementById("user-state");
+      const li = document.getElementById("login-btn");
+      const lo = document.getElementById("logout-btn");
+      if (kc?.authenticated) {
+        u.textContent = `signed in as ${kc.tokenParsed?.preferred_username || kc.tokenParsed?.email || "user"}`;
+        li.style.display = "none"; lo.style.display = "inline-block";
+      } else {
+        u.textContent = "not signed in";
+        li.style.display = "inline-block"; lo.style.display = "none";
+      }
+    }
+
+    document.getElementById("login-btn").onclick = () => kc.login();
+    document.getElementById("logout-btn").onclick = () => kc.logout();
+
+    function setOutput({ title, status, summary, body }) {
+      document.getElementById("out-title").textContent = title;
+      const pill = document.getElementById("status-pill");
+      pill.textContent = status ?? "—";
+      pill.className = "status-pill " + (status >= 200 && status < 300 ? "ok" : status ? "err" : "");
+      document.getElementById("out-summary").textContent = summary;
+      document.getElementById("out-body").textContent = body;
+    }
+
+    async function fire({ method = "GET", path, headers = {}, body = null, requireAuth = false, raw = false }) {
+      const url = `${apiBase}${path}`;
+      const reqLine = `${method} ${path}`;
+      const reqHeaders = { ...headers };
+      if (requireAuth && kc?.authenticated) {
+        try { await kc.updateToken(30); } catch {}
+        reqHeaders["Authorization"] = `Bearer ${kc.token}`;
+      }
+      let opts = { method, headers: reqHeaders };
+      if (body !== null) {
+        opts.headers["Content-Type"] = "application/json";
+        opts.body = raw ? body : JSON.stringify(body);
+      }
+      try {
+        const res = await fetch(url, opts);
+        const text = await res.text();
+        let parsed;
+        try { parsed = JSON.stringify(JSON.parse(text), null, 2); } catch { parsed = text; }
+        setOutput({
+          title: reqLine,
+          status: res.status,
+          summary: `${res.status} ${res.statusText} — ${url}`,
+          body: parsed || "(empty)",
+        });
+      } catch (err) {
+        setOutput({
+          title: reqLine,
+          status: 0,
+          summary: `network error — ${url}`,
+          body: String(err),
+        });
+      }
+    }
+
+    const demos = {
+      "search-normal": () => fire({ path: "/api/products?q=router&category=networking" }),
+      "search-tricky": () => fire({ path: "/api/products?q=" + encodeURIComponent("1' OR rating>4") }),
+      "get-product": () => fire({ path: "/api/products/11111111-1111-1111-1111-111111111111" }),
+      "review-normal": () => fire({
+        method: "POST", path: "/api/reviews",
+        body: { productId: "11111111-1111-1111-1111-111111111111", rating: 5, comment: "Great router. The SELECT statement in the docs was helpful." },
+      }),
+
+      "search-bad-category": () => fire({ path: "/api/products?category=" + encodeURIComponent("' OR 1=1--") }),
+      "search-bad-limit": () => fire({ path: "/api/products?limit=abc" }),
+      "path-injection": () => fire({ path: "/api/products/" + encodeURIComponent("'; DROP TABLE users;--") }),
+      "review-extra-field": () => fire({
+        method: "POST", path: "/api/reviews",
+        body: { productId: "11111111-1111-1111-1111-111111111111", rating: 5, comment: "ok", isAdmin: true },
+      }),
+      "review-bad-rating": () => fire({
+        method: "POST", path: "/api/reviews",
+        body: { productId: "11111111-1111-1111-1111-111111111111", rating: 99, comment: "ok" },
+      }),
+      "review-missing-field": () => fire({
+        method: "POST", path: "/api/reviews",
+        body: { productId: "11111111-1111-1111-1111-111111111111", rating: 5 },
+      }),
+
+      "account": () => fire({ path: "/api/account", requireAuth: true }),
+      "order": () => fire({
+        method: "POST", path: "/api/orders", requireAuth: true,
+        body: { productId: "11111111-1111-1111-1111-111111111111", quantity: 2 },
+      }),
+      "account-no-token": () => fire({ path: "/api/account" }),
+      "account-bad-token": () => fire({ path: "/api/account", headers: { Authorization: "Bearer abc.def.ghi" } }),
+
+      "show-spec": () => fire({ path: "/openapi.json" }),
+    };
+
+    document.querySelectorAll("button.action").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const k = btn.dataset.demo;
+        if (demos[k]) demos[k]();
+      });
+    });
+
+    initKeycloak();
+  </script>
+</body>
+</html>

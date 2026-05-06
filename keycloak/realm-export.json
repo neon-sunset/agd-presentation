@@ -1,0 +1,84 @@
+{
+  "realm": "demo",
+  "enabled": true,
+  "displayName": "API Guardian Demo",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "sslRequired": "external",
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 3600,
+  "ssoSessionMaxLifespan": 28800,
+
+  "roles": {
+    "realm": [
+      { "name": "user", "description": "Default demo user role" },
+      { "name": "admin", "description": "Demo admin role" }
+    ]
+  },
+
+  "users": [
+    {
+      "username": "demo",
+      "email": "demo@example.com",
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "User",
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "demo", "temporary": false }
+      ],
+      "realmRoles": ["user"]
+    },
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "enabled": true,
+      "credentials": [
+        { "type": "password", "value": "alice", "temporary": false }
+      ],
+      "realmRoles": ["user", "admin"]
+    }
+  ],
+
+  "clients": [
+    {
+      "clientId": "demo-spa",
+      "name": "API Guardian Demo SPA",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "redirectUris": [
+        "http://localhost:8000/*",
+        "https://*.b-cdn.net/*",
+        "https://*.bunny.run/*",
+        "https://*.bunny.net/*"
+      ],
+      "webOrigins": [
+        "http://localhost:8000",
+        "+"
+      ],
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "optionalClientScopes": []
+    }
+  ]
+}
