@@ -179,7 +179,7 @@ def list_products(
     ),
     category: Category | None = Query(
         default=None,
-        description="Product category. Strict enum + injection scanning at the edge.",
+        description="Product category. Strict enum, validated at the edge.",
     ),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> ProductList:
@@ -303,7 +303,6 @@ def index() -> FileResponse:
 
 SHIELD_HINTS: dict[tuple[str, str, str, str], str] = {
     # (path, method, in, name) -> x-bunny-shield value
-    ("/api/products", "get", "query", "category"): "detectsqli,detectxss",
     ("/api/products/{productId}", "get", "path", "productId"): "detectsqli,detectxss",
 }
 

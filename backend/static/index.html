@@ -144,8 +144,8 @@
       <h2>Attacks (AGD should block these)</h2>
       <div class="row">
         <button class="action bad" data-demo="search-bad-category">
-          <span class="label">SQLi via category param</span>
-          <span class="hint">category=' UNION SELECT NULL-- — schema enum + detectsqli</span>
+          <span class="label">Invalid category value</span>
+          <span class="hint">category=hacking — not in schema enum</span>
         </button>
         <button class="action bad" data-demo="search-bad-limit">
           <span class="label">Wrong type for limit</span>
@@ -326,7 +326,7 @@
         body: { productId: "11111111-1111-1111-1111-111111111111", rating: 5, comment: "Great router. The SELECT statement in the docs was helpful." },
       }),
 
-      "search-bad-category": () => fire({ path: "/api/products?category=" + encodeURIComponent("' UNION SELECT NULL,NULL--") }),
+      "search-bad-category": () => fire({ path: "/api/products?category=hacking" }),
       "search-bad-limit": () => fire({ path: "/api/products?limit=abc" }),
       "path-injection": () => fire({ path: "/api/products/" + encodeURIComponent("'; DROP TABLE users;--") }),
       "review-extra-field": () => fire({
