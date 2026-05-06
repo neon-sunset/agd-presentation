@@ -17,7 +17,7 @@ import os
 import uuid
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from enum import Enum
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -25,7 +25,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 OIDC_ISSUER = os.environ.get("OIDC_ISSUER", "http://localhost:8080/realms/demo")
 OIDC_DISCOVERY_URL = f"{OIDC_ISSUER}/.well-known/openid-configuration"
-PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 
 app = FastAPI(
     title="API Guardian Demo",
@@ -35,6 +34,9 @@ app = FastAPI(
         "Endpoints are intentionally shaped to produce false positives "
         "with legacy WAF rules, while remaining valid against this schema."
     ),
+    openapi_url=None,  # we serve /openapi.json ourselves so the `servers` block is request-derived
+    docs_url=None,
+    redoc_url=None,
 )
 
 
@@ -254,7 +256,7 @@ def config_js() -> Response:
         "window.DEMO_CONFIG = {\n"
         f'  oidcIssuer: "{OIDC_ISSUER}",\n'
         f'  oidcClientId: "{client_id}",\n'
-        f'  apiBase: "{PUBLIC_BASE_URL}"\n'
+        '  apiBase: ""\n'
         "};\n"
     )
     return Response(content=body, media_type="application/javascript")
@@ -284,9 +286,23 @@ def _apply_shield_hints(schema: dict[str, Any]) -> None:
                     param.setdefault("schema", {})["x-bunny-shield"] = hint
 
 
-def custom_openapi() -> dict[str, Any]:
-    if app.openapi_schema:
-        return app.openapi_schema
+def _public_base_url(request: Request) -> str:
+    """
+    Resolve the externally-visible base URL from the inbound request, so the
+    OAS `servers` block reflects whatever host (PZ, MC URL, localhost) the
+    spec was fetched through. Honors X-Forwarded-Host / -Proto when present
+    (set by Pull Zone / MC ingress), falls back to the request's own host.
+    """
+    headers = request.headers
+    proto = (headers.get("x-forwarded-proto") or request.url.scheme).split(",")[0].strip()
+    host = (headers.get("x-forwarded-host") or headers.get("host") or "").split(",")[0].strip()
+    if not host:
+        host = "localhost:8000"
+    return f"{proto}://{host}"
+
+
+@app.get("/openapi.json", include_in_schema=False)
+def openapi_spec(request: Request) -> JSONResponse:
     from fastapi.openapi.utils import get_openapi
 
     schema = get_openapi(
@@ -295,14 +311,10 @@ def custom_openapi() -> dict[str, Any]:
         description=app.description,
         routes=app.routes,
     )
-    schema["servers"] = [{"url": PUBLIC_BASE_URL}]
+    schema["servers"] = [{"url": _public_base_url(request)}]
     schema.setdefault("components", {}).setdefault("securitySchemes", {})["oidc"] = {
         "type": "openIdConnect",
         "openIdConnectUrl": OIDC_DISCOVERY_URL,
     }
     _apply_shield_hints(schema)
-    app.openapi_schema = schema
-    return schema
-
-
-app.openapi = custom_openapi  # type: ignore[assignment]
+    return JSONResponse(content=schema)
